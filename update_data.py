@@ -55,10 +55,12 @@ for pref_name, pref_url in pref_links:
             prev_elements = table.find_all_previous(['p', 'h3', 'h4', 'div'])
             for element in prev_elements:
                 text = element.get_text(strip=True)
-                # 【修正ポイント】「執行」というキーワードが含まれるテキストは無視するよう追加しました
-                if len(text) > 3 and "管轄" not in text and "裁判所" not in text and "執行" not in text:
+                if len(text) > 3 and "管轄" not in text and "裁判所" not in text and "執行" not in text and "競売" not in text:
                     area_text = text
                     break
+            
+            # 【強力な除外処理 1】地域名に注釈がくっついている場合、ハサミで切り落とす
+            area_text = re.split(r'※|執行|不動産|競売', area_text)[0].strip()
             
             courts_in_table = []
             for row in table.find_all("tr"):
@@ -67,9 +69,17 @@ for pref_name, pref_url in pref_links:
                     cells = row.find_all(["td", "th"])
                     for cell in cells:
                         cell_text = cell.get_text(strip=True)
+                        
+                        # 【強力な除外処理 2】裁判所名に注釈がくっついている場合、ハサミで切り落とす
+                        cell_text = re.split(r'※|執行|不動産|競売', cell_text)[0].strip()
+                        # カッコ書きの不要な注釈も削除
+                        cell_text = re.sub(r'（[^）]*）', '', cell_text)
+                        cell_text = re.sub(r'\([^)]*\)', '', cell_text)
+                        cell_text = cell_text.strip()
+                        
                         if "簡易" in cell_text or "高等" in cell_text:
                             continue
-                        if cell_text in ["地方・家庭裁判所", "地方裁判所", "家庭裁判所", "家裁出張所", "本庁", "支部", "出張所", "－", "-"]:
+                        if cell_text in ["地方・家庭裁判所", "地方裁判所", "家庭裁判所", "家裁出張所", "本庁", "支部", "出張所", "－", "-", ""]:
                             continue
                         if "裁判所" in cell_text or "支部" in cell_text or "出張所" in cell_text:
                             courts_in_table.append(cell_text)
@@ -87,7 +97,7 @@ for pref_name, pref_url in pref_links:
             if best_court == "情報なし" and courts_in_table:
                 best_court = courts_in_table[0]
                         
-            if best_court != "情報なし":
+            if best_court != "情報なし" and area_text and area_text != "地域不明":
                 results.append({
                     "都道府県": pref_name,
                     "対象地域テキスト": area_text, 
