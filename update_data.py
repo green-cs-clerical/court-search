@@ -7,7 +7,6 @@ import time
 
 print("データ収集を開始します...")
 
-# --- 1. 全国の都道府県ページURLを取得する ---
 PREFECTURES = [
     "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県", 
     "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県", 
@@ -26,34 +25,23 @@ res_index.encoding = res_index.apparent_encoding
 soup_index = BeautifulSoup(res_index.text, "html.parser")
 
 pref_links = []
-
-# トップページから47都道府県のリンクを確実に取得する
 for a_tag in soup_index.find_all("a"):
     href = a_tag.get("href")
     text = a_tag.get_text(strip=True)
-    
-    # テキストが47都道府県のいずれかと完全に一致した場合のみ処理
     if href and text in PREFECTURES:
-        # URLの形式に合わせて絶対URLを作成
-        if href.startswith("http"):
-            full_url = href
-        elif href.startswith("/"):
-            full_url = base_url + href
-        else:
-            full_url = "https://www.courts.go.jp/about/sosiki/kankatu/" + href
+        if href.startswith("http"): full_url = href
+        elif href.startswith("/"): full_url = base_url + href
+        else: full_url = "https://www.courts.go.jp/about/sosiki/kankatu/" + href
             
-        # リストにまだ追加されていなければ追加（重複防止）
         if not any(p[0] == text for p in pref_links):
             pref_links.append((text, full_url))
-
-print(f"✅ {len(pref_links)}都道府県のリンクを取得しました。各ページを順番に巡回します。\n（※サーバーに負荷をかけないよう、約1〜2分かかります）\n")
 
 results = []
 
 # --- 2. 各都道府県ページから順番にデータを取得する ---
 for pref_name, pref_url in pref_links:
     print(f"読込中: {pref_name} ...")
-    time.sleep(1) # 【重要】1秒待機
+    time.sleep(1) 
     
     try:
         res = requests.get(pref_url)
@@ -70,28 +58,52 @@ for pref_name, pref_url in pref_links:
                 if len(text) > 3 and "管轄" not in text and "裁判所" not in text:
                     area_text = text
                     break
-                    
-            family_court = "情報なし"
+            
+            # 【ここが修正ポイント】
+            # すべての裁判所候補をリストに集め、最も適切なものを選ぶ
+            courts_in_table = []
             for row in table.find_all("tr"):
                 row_text = row.get_text(strip=True)
-                if "家庭裁判所" in row_text or "家裁出張所" in row_text:
+                
+                # 行に「家庭裁判所」「家裁」「支部」のいずれかが含まれていれば調べる
+                if "家庭裁判所" in row_text or "家裁出張所" in row_text or "支部" in row_text:
                     tds = row.find_all("td")
                     if tds:
-                        family_court = tds[-1].get_text(strip=True)
+                        # 表の一番右のセルが具体的な裁判所名
+                        cell_text = tds[-1].get_text(strip=True)
+                        
+                        # 単なるラベル（「支部」だけ等）や、簡易裁判所・高等裁判所を除外してリストに追加
+                        if cell_text and cell_text not in ["地方・家庭裁判所", "家庭裁判所", "家裁出張所", "本庁", "支部", "－", "-"]:
+                            if "簡易" not in cell_text and "高等" not in cell_text:
+                                courts_in_table.append(cell_text)
+            
+            # 優先順位（1.出張所 -> 2.支部 -> 3.本庁）に基づいて最適な裁判所を決定する
+            best_court = "情報なし"
+            for c in courts_in_table:
+                if "出張所" in c:
+                    best_court = c
+                    break
+            
+            if best_court == "情報なし":
+                for c in courts_in_table:
+                    if "支部" in c:
+                        best_court = c
                         break
                         
-            if family_court != "情報なし":
+            if best_court == "情報なし" and courts_in_table:
+                best_court = courts_in_table[0] # 出張所も支部もない場合は、最初に見つけた本庁
+                        
+            if best_court != "情報なし":
                 results.append({
                     "都道府県": pref_name,
                     "対象地域テキスト": area_text, 
-                    "管轄家庭裁判所": family_court
+                    "管轄家庭裁判所": best_court
                 })
     except Exception as e:
         print(f"⚠️ {pref_name} でエラーが発生しました: {e}")
 
-# エラー回避：もしデータが全く取れていなかったらここでストップする
 if not results:
-    print("\n❌ エラー: データを1件も取得できませんでした。")
+    print("\n❌ エラー: データを取得できませんでした。")
 else:
     # --- 3. データの自動分割（クレンジング） ---
     df = pd.DataFrame(results)
@@ -150,8 +162,8 @@ else:
     <body>
         <div class="container">
             <h2>🏠 管轄家庭裁判所 検索システム (全国版)</h2>
-            <p>調べたい市区町村名を入力してください（例：府中、江別）</p>
-            <input type="text" id="searchInput" placeholder="例：府中市" onkeypress="if(event.key === 'Enter') searchCourt()">
+            <p>調べたい市区町村名を入力してください（例：明石、江別）</p>
+            <input type="text" id="searchInput" placeholder="例：明石市" onkeypress="if(event.key === 'Enter') searchCourt()">
             <button onclick="searchCourt()">検索</button>
             <div id="result"></div>
         </div>
@@ -173,7 +185,7 @@ else:
                 
                 for (const [prefCity, court] of Object.entries(courtData)) {{
                     if (prefCity.includes(query)) {{
-                        foundHtml += `<div class='match-item'>【 <b>${{prefCity}}</b> 】の管轄は <b>${{court}} 家庭裁判所</b> です。</div>`;
+                        foundHtml += `<div class='match-item'>【 <b>${{prefCity}}</b> 】の管轄は <b>${{court}}</b> です。</div>`;
                         count++;
                     }}
                 }}
@@ -191,6 +203,3 @@ else:
 
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(html_template)
-
-    print("\n✅ 【全国版】検索システムの作成が完了しました！")
-    print("左のフォルダアイコンから『index.html』をダウンロードしてください。")
