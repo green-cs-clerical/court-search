@@ -55,33 +55,25 @@ for pref_name, pref_url in pref_links:
             prev_elements = table.find_all_previous(['p', 'h3', 'h4', 'div'])
             for element in prev_elements:
                 text = element.get_text(strip=True)
-                if len(text) > 3 and "管轄" not in text and "裁判所" not in text:
+                # 【修正ポイント】「執行」というキーワードが含まれるテキストは無視するよう追加しました
+                if len(text) > 3 and "管轄" not in text and "裁判所" not in text and "執行" not in text:
                     area_text = text
                     break
             
-            # 【改良】行の中のすべてのマス（セル）をチェックする
             courts_in_table = []
             for row in table.find_all("tr"):
                 row_text = row.get_text(strip=True)
-                # 「出張所」というキーワードも条件に追加
                 if "家庭裁判所" in row_text or "家裁" in row_text or "支部" in row_text or "出張所" in row_text:
                     cells = row.find_all(["td", "th"])
                     for cell in cells:
                         cell_text = cell.get_text(strip=True)
-                        
-                        # 簡易裁判所などは除外
                         if "簡易" in cell_text or "高等" in cell_text:
                             continue
-                            
-                        # 単なるラベル（見出し）は除外
                         if cell_text in ["地方・家庭裁判所", "地方裁判所", "家庭裁判所", "家裁出張所", "本庁", "支部", "出張所", "－", "-"]:
                             continue
-                            
-                        # 具体的な裁判所名（支部・出張所含む）らしきものをリストに追加
                         if "裁判所" in cell_text or "支部" in cell_text or "出張所" in cell_text:
                             courts_in_table.append(cell_text)
             
-            # 出張所 > 支部 > 本庁 の優先順位で採用する
             best_court = "情報なし"
             for c in courts_in_table:
                 if "出張所" in c:
@@ -142,7 +134,6 @@ if results:
 
     data_json = json.dumps(data_dict, ensure_ascii=False)
     
-    # 最終更新時間を取得（日本時間）
     now_str = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M")
 
     html_template = f"""<!DOCTYPE html>
