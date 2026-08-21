@@ -4,6 +4,7 @@ import pandas as pd
 import re
 import json
 import time
+import datetime
 
 print("データ収集を開始します...")
 
@@ -38,7 +39,6 @@ for a_tag in soup_index.find_all("a"):
 
 results = []
 
-# --- 2. 各都道府県ページから順番にデータを取得する ---
 for pref_name, pref_url in pref_links:
     print(f"読込中: {pref_name} ...")
     time.sleep(1) 
@@ -59,39 +59,31 @@ for pref_name, pref_url in pref_links:
                     area_text = text
                     break
             
-            # 【ここが修正ポイント】
-            # すべての裁判所候補をリストに集め、最も適切なものを選ぶ
+            # 【改良】tdだけでなくthタグも対象にして確実に取りこぼしを防ぐ
             courts_in_table = []
             for row in table.find_all("tr"):
                 row_text = row.get_text(strip=True)
-                
-                # 行に「家庭裁判所」「家裁」「支部」のいずれかが含まれていれば調べる
-                if "家庭裁判所" in row_text or "家裁出張所" in row_text or "支部" in row_text:
-                    tds = row.find_all("td")
-                    if tds:
-                        # 表の一番右のセルが具体的な裁判所名
-                        cell_text = tds[-1].get_text(strip=True)
-                        
-                        # 単なるラベル（「支部」だけ等）や、簡易裁判所・高等裁判所を除外してリストに追加
+                if "家庭裁判所" in row_text or "家裁" in row_text or "支部" in row_text:
+                    cells = row.find_all(["td", "th"])
+                    if cells:
+                        cell_text = cells[-1].get_text(strip=True)
                         if cell_text and cell_text not in ["地方・家庭裁判所", "家庭裁判所", "家裁出張所", "本庁", "支部", "－", "-"]:
                             if "簡易" not in cell_text and "高等" not in cell_text:
                                 courts_in_table.append(cell_text)
             
-            # 優先順位（1.出張所 -> 2.支部 -> 3.本庁）に基づいて最適な裁判所を決定する
+            # 出張所 > 支部 > 本庁 の優先順位
             best_court = "情報なし"
             for c in courts_in_table:
                 if "出張所" in c:
                     best_court = c
                     break
-            
             if best_court == "情報なし":
                 for c in courts_in_table:
                     if "支部" in c:
                         best_court = c
                         break
-                        
             if best_court == "情報なし" and courts_in_table:
-                best_court = courts_in_table[0] # 出張所も支部もない場合は、最初に見つけた本庁
+                best_court = courts_in_table[0]
                         
             if best_court != "情報なし":
                 results.append({
@@ -102,10 +94,7 @@ for pref_name, pref_url in pref_links:
     except Exception as e:
         print(f"⚠️ {pref_name} でエラーが発生しました: {e}")
 
-if not results:
-    print("\n❌ エラー: データを取得できませんでした。")
-else:
-    # --- 3. データの自動分割（クレンジング） ---
+if results:
     df = pd.DataFrame(results)
     df = df[df["対象地域テキスト"] != "地域不明"].drop_duplicates()
 
@@ -134,7 +123,6 @@ else:
     df_expanded = df.explode("市区町村リスト").reset_index(drop=True)
     df_final = df_expanded[["都道府県", "市区町村リスト", "管轄家庭裁判所"]].rename(columns={"市区町村リスト": "市区町村"})
 
-    # --- 4. HTMLファイルの自動生成 ---
     data_dict = {}
     for index, row in df_final.iterrows():
         city_name = str(row['市区町村']).strip()
@@ -143,6 +131,9 @@ else:
             data_dict[key] = row['管轄家庭裁判所']
 
     data_json = json.dumps(data_dict, ensure_ascii=False)
+    
+    # 最終更新時間を取得（日本時間）
+    now_str = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%Y-%m-%d %H:%M")
 
     html_template = f"""<!DOCTYPE html>
     <html lang="ja">
@@ -151,16 +142,18 @@ else:
         <title>【全国版】管轄家庭裁判所 検索</title>
         <style>
             body {{ font-family: 'Meiryo', sans-serif; background-color: #f4f7f6; color: #333; padding: 30px; text-align: center; }}
-            .container {{ background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 650px; margin: 0 auto; }}
+            .container {{ background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 650px; margin: 0 auto; position: relative; }}
             input {{ font-size: 18px; padding: 10px; width: 65%; border: 1px solid #ccc; border-radius: 5px; }}
             button {{ font-size: 18px; padding: 10px 20px; background-color: #0056b3; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 5px; }}
             button:hover {{ background-color: #004494; }}
             #result {{ margin-top: 25px; font-size: 18px; text-align: left; line-height: 1.8; }}
             .match-item {{ background: #e9f5ff; padding: 10px; margin-bottom: 10px; border-left: 5px solid #0056b3; border-radius: 3px; }}
+            .update-time {{ position: absolute; top: 10px; right: 20px; font-size: 12px; color: #888; }}
         </style>
     </head>
     <body>
         <div class="container">
+            <div class="update-time">最終データ更新: {now_str}</div>
             <h2>🏠 管轄家庭裁判所 検索システム (全国版)</h2>
             <p>調べたい市区町村名を入力してください（例：明石、江別）</p>
             <input type="text" id="searchInput" placeholder="例：明石市" onkeypress="if(event.key === 'Enter') searchCourt()">
