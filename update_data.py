@@ -59,19 +59,29 @@ for pref_name, pref_url in pref_links:
                     area_text = text
                     break
             
-            # 【改良】tdだけでなくthタグも対象にして確実に取りこぼしを防ぐ
+            # 【改良】行の中のすべてのマス（セル）をチェックする
             courts_in_table = []
             for row in table.find_all("tr"):
                 row_text = row.get_text(strip=True)
-                if "家庭裁判所" in row_text or "家裁" in row_text or "支部" in row_text:
+                # 「出張所」というキーワードも条件に追加
+                if "家庭裁判所" in row_text or "家裁" in row_text or "支部" in row_text or "出張所" in row_text:
                     cells = row.find_all(["td", "th"])
-                    if cells:
-                        cell_text = cells[-1].get_text(strip=True)
-                        if cell_text and cell_text not in ["地方・家庭裁判所", "家庭裁判所", "家裁出張所", "本庁", "支部", "－", "-"]:
-                            if "簡易" not in cell_text and "高等" not in cell_text:
-                                courts_in_table.append(cell_text)
+                    for cell in cells:
+                        cell_text = cell.get_text(strip=True)
+                        
+                        # 簡易裁判所などは除外
+                        if "簡易" in cell_text or "高等" in cell_text:
+                            continue
+                            
+                        # 単なるラベル（見出し）は除外
+                        if cell_text in ["地方・家庭裁判所", "地方裁判所", "家庭裁判所", "家裁出張所", "本庁", "支部", "出張所", "－", "-"]:
+                            continue
+                            
+                        # 具体的な裁判所名（支部・出張所含む）らしきものをリストに追加
+                        if "裁判所" in cell_text or "支部" in cell_text or "出張所" in cell_text:
+                            courts_in_table.append(cell_text)
             
-            # 出張所 > 支部 > 本庁 の優先順位
+            # 出張所 > 支部 > 本庁 の優先順位で採用する
             best_court = "情報なし"
             for c in courts_in_table:
                 if "出張所" in c:
@@ -155,7 +165,7 @@ if results:
         <div class="container">
             <div class="update-time">最終データ更新: {now_str}</div>
             <h2>🏠 管轄家庭裁判所 検索システム (全国版)</h2>
-            <p>調べたい市区町村名を入力してください（例：明石、江別）</p>
+            <p>調べたい市区町村名を入力してください（例：明石、八丈）</p>
             <input type="text" id="searchInput" placeholder="例：明石市" onkeypress="if(event.key === 'Enter') searchCourt()">
             <button onclick="searchCourt()">検索</button>
             <div id="result"></div>
