@@ -1,0 +1,48 @@
+name: Monthly Court Data Update
+
+# いつ実行するか（トリガー）
+on:
+  schedule:
+    # 毎月1日の夜中0時（日本時間の午前9時）に実行
+    - cron: '0 0 1 * *'
+  # 手動で実行できるボタンも用意しておく
+  workflow_dispatch:
+
+# 実行する内容（ジョブ）
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # リポジトリに対する書き込み権限を付与する
+    permissions:
+      contents: write
+
+    steps:
+    # 1. リポジトリのコードを読み込む
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    # 2. Pythonの準備
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    # 3. 必要なライブラリのインストール
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    # 4. 裁判所データの取得とHTML（index.html）の生成
+    - name: Run Python script
+      run: python update_data.py
+
+    # 5. 生成された index.html をGitHubに保存（上書き）する
+    - name: Commit and push changes
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add index.html
+        # 変更があればコミットしてプッシュ
+        git diff --quiet && git diff --staged --quiet || git commit -m "Auto update court data"
+        git push
